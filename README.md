@@ -1,5 +1,9 @@
+bam2fastq
+=========
+    
 bam2fastq is a program to extract sequences and qualities from a BAM file.
 
+------------
 INSTALLATION
 
 Requires make, gcc, and the zlib compression libraries - all of which should
@@ -18,6 +22,7 @@ cd bam2fastq
 make
 ```
 
+------
 AUTHOR
 
 This program was originally developed at HudsonAlpha by Phillip Dexheimer. 
