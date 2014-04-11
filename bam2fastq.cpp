@@ -38,23 +38,27 @@ int save_aligned = 1;
 int save_unaligned = 1;
 int save_filtered = 1;
 int overwrite_files = 0;
+int stdout_pairs = 0;
+int stdout_all = 0;
 int print_msgs = 1;
 int strict = 0;
 
 static struct option longopts[] = {
-    { "help",         no_argument,       NULL,           'h' },
-    { "version",      no_argument,       NULL,           'v' },
-    { "output",       required_argument, NULL,           'o' },
-    { "force",        no_argument,       NULL,           'f' },
-    { "quiet",        no_argument,       NULL,           'q' },
-    { "strict",       no_argument,       NULL,           's' },
-    { "overwrite",    no_argument,       &overwrite_files,0  },
-    { "aligned",      no_argument,       &save_aligned,   1  },
-    { "no-aligned",   no_argument,       &save_aligned,   0  },
-    { "unaligned",    no_argument,       &save_unaligned, 1  },
-    { "no-unaligned", no_argument,       &save_unaligned, 0  },
-    { "filtered",     no_argument,       &save_filtered,  1  },
-    { "no-filtered",  no_argument,       &save_filtered,  0  },
+    { "help",            no_argument,       NULL,           'h' },
+    { "version",         no_argument,       NULL,           'v' },
+    { "output",          required_argument, NULL,           'o' },
+    { "force",           no_argument,       NULL,           'f' },
+    { "quiet",           no_argument,       NULL,           'q' },
+    { "strict",          no_argument,       NULL,           's' },
+    { "overwrite",       no_argument,       &overwrite_files,0  },
+    { "aligned",         no_argument,       &save_aligned,   1  },
+    { "no-aligned",      no_argument,       &save_aligned,   0  },
+    { "unaligned",       no_argument,       &save_unaligned, 1  },
+    { "no-unaligned",    no_argument,       &save_unaligned, 0  },
+    { "filtered",        no_argument,       &save_filtered,  1  },
+    { "no-filtered",     no_argument,       &save_filtered,  0  },
+    { "pairs-to-stdout", no_argument,       &stdout_pairs,   1  },
+    { "all-to-stdout",   no_argument,       &stdout_all,     1  },
     { NULL,           0,                 NULL,            0  }
 };
 
@@ -67,28 +71,32 @@ void usage(int error=1) {
          << "  -o FILENAME, --output FILENAME" << endl
          << "       Specifies the name of the FASTQ file(s) that will be generated.  May" << endl
          << "       contain the special characters % (replaced with the lane number) and" << endl
-         << "       # (replaced with _1 or _2 to distinguish PE reads, removed for SE reads)." << endl
-         << "       [Default: s_%#_sequence.txt]" << endl
+         << "       # (replaced with _1 or _2 to distinguish PE reads, _M for unpaired reads)." << endl
+         << "       [Default: s_%#_sequence.txt]" << endl << endl
+         << "  --pairs-to-stdout" << endl
+         << "       Write the paired reads to stdout " << endl << endl
+         << "  --all-to-stdout" << endl
+         << "       Write all reads to stdout, ignoring pairing" << endl << endl
          << "  -f, --force, --overwrite" << endl
          << "       Create output files specified with --output, overwriting existing" << endl
-         << "       files if necessary [Default: exit program rather than overwrite files]" << endl
+         << "       files if necessary [Default: exit program rather than overwrite files]" << endl << endl
          << "  --aligned" << endl
          << "  --no-aligned" << endl
          << "       Reads in the BAM that are aligned will (will not) be extracted." << endl
-         << "       [Default: extract aligned reads]" << endl
+         << "       [Default: extract aligned reads]" << endl << endl
          << "  --unaligned" << endl
          << "  --no-unaligned" << endl
          << "       Reads in the BAM that are not aligned will (will not) be extracted." << endl
-         << "       [Default: extract unaligned reads]" << endl
+         << "       [Default: extract unaligned reads]" << endl << endl
          << "  --filtered" << endl
          << "  --no-filtered" << endl
          << "       Reads that are marked as failing QC checks will (will not) be extracted." << endl
-         << "       [Default: extract filtered reads]" << endl
+         << "       [Default: extract filtered reads]" << endl << endl
          << "  -q, --quiet" << endl
-         << "       Suppress informational messages [Default: print messages]" << endl
+         << "       Suppress informational messages [Default: print messages]" << endl << endl
          << "  -s, --strict" << endl
          << "       Keep bam2fastq's processing to a minimum, assuming that the BAM strictly"
-         << "       meets specifications. [Default: allow some errors in the BAM]" << endl
+         << "       meets specifications. [Default: allow some errors in the BAM]" << endl << endl
          << endl;
     exit(error);
 }
@@ -162,8 +170,23 @@ void mangle(string &name) {
         name.erase(name.length()-2);
 }
 
-vector<ofstream *> initialize_output(const string &out_template, int lane) {
-    vector<ofstream *> files;
+vector<ostream *> initialize_all_stdout() {
+    vector<ostream *> files;
+    files.push_back(&std::cout);
+    return files;
+}
+
+vector<ostream *> initialize_paired_stdout() {
+    vector<ostream *> files;
+    files.push_back(&std::cout);
+    files.push_back(&std::cout);
+    files.push_back(new ofstream("unpaired_reads.fastq", ios_base::out));
+    return files;
+}
+
+vector<ostream *> initialize_output(const string &out_template, int lane) {
+    
+    vector<ostream *> files;
     string output(out_template);
     
     //First, replace % in the filename with the lane number
@@ -184,21 +207,23 @@ vector<ofstream *> initialize_output(const string &out_template, int lane) {
 
     //Replace
     if (readMarker == string::npos) {
-        cerr << "The sequences in the BAM file are marked as Paired, but a single output" << endl
-             << "file is specified.  Ensure that the output filename (--output) includes" << endl
-             << "a # symbol to be replaced with the read number" << endl;
+        std::cerr << "Plesae ensure that the output filename (--output) includes" << endl
+                  << "a # symbol to be replaced with the read number" << endl;
         return files;
     }
+
     string file1(output);
     file1.replace(readMarker, 1, "_1");
     string file2(output);
     file2.replace(readMarker, 1, "_2");
     string file3(output);
     file3.replace(readMarker, 1, "_M");
-    if (print_msgs)
+
+    if (print_msgs) {
         cerr << "This looks like paired data from lane " << lane << "." << endl
              << "Output will be in " << file1 << " and " << file2 << endl
              << "Single-end reads will be in " << file3 << endl;
+    }
 
     //If we're not going to overwrite, check to see if the files exist
     if (!overwrite_files) {
@@ -215,6 +240,7 @@ vector<ofstream *> initialize_output(const string &out_template, int lane) {
             return files;
         }
     }
+
     files.push_back(new ofstream(file1.c_str(), ios_base::out));
     files.push_back(new ofstream(file2.c_str(), ios_base::out));
     files.push_back(new ofstream(file3.c_str(), ios_base::out));
@@ -243,12 +269,22 @@ void parse_bamfile(const char *bam_filename, const string &output_template) {
 
     bam_read1(sam->x.bam, read);
     int lane = get_lane_id(read);
-    vector<ofstream *> output = initialize_output(output_template, lane);
+
+    vector<ostream *> output;
+    if(stdout_pairs) {
+        output = initialize_paired_stdout();
+    } else if(stdout_all) {
+        output = initialize_all_stdout();
+    } else {
+        output = initialize_output(output_template, lane);
+    }
+
     if (output.empty())
         return;
 
     map<string, string> unPaired;
     map<string, string>::iterator position;
+
     do {
         all_seen++;
         if (!save_aligned && !(read->core.flag & BAM_FUNMAP))
@@ -268,8 +304,12 @@ void parse_bamfile(const char *bam_filename, const string &output_template) {
         //Paired-end is complicated, because both members of the pair
         //have to be output at the same position of the two files
 
-        // Is this an unpaired read in a BAM with pairs? write to the _M file
-        if( !(read->core.flag & BAM_FPAIRED) ) {
+        // If there is only one output filehandle we don't care about
+        // pairing and can write immediately
+        if(output.size() == 1) {
+            *output[0] << ostr.str();
+        } else if( !(read->core.flag & BAM_FPAIRED) ) {
+            // Is this an unpaired read in a BAM with pairs? write to the _M file
             *output[2] << ostr.str();
         } else {
 
@@ -285,28 +325,44 @@ void parse_bamfile(const char *bam_filename, const string &output_template) {
                 //Aha!  This will be the second of the two.  Dump them both,
                 //then clean up
                 int r_idx = get_read_idx(read);
-                *output[r_idx] << ostr.str();
-                r_idx = !r_idx;
-                *output[r_idx] << position->second;
+
+                // Since we want to output interleaved pairs in stdout mode
+                // we need to take care to write them in the correct order
+                if(r_idx == 0) {
+                    *output[0] << ostr.str();
+                    *output[1] << position->second;
+                } else {
+                    *output[0] << position->second;
+                    *output[1] << ostr.str();
+                }
                 unPaired.erase(position);
             }
         }
 
     } while (bam_read1(sam->x.bam, read) > 0);
+
     //The documentation for bam_read1 says that it returns the number of
     //bytes read - which is true, unless it doesn't read any.  It returns
     //-1 for normal EOF and -2 for unexpected EOF.  So don't just wait for
     //it to return 0...
-    for_each(output.begin(), output.end(), DeleteObject());
     bam_destroy1(read);
     samclose(sam);
+
+    // Write the remaining unpaired file to the single-end file
+    for(map<string, string>::iterator iter = unPaired.begin(); 
+            iter != unPaired.end(); ++iter) {
+        *output[2] << iter->second;
+    }
+
+    // Clean up filehandles
+    for(size_t i = 0; i < output.size(); ++i) {
+        if(output[i] != &std::cout)
+            delete output[i];
+    }
+
     if (print_msgs) {
         cerr << all_seen << " sequences in the BAM file" << endl;
         cerr << exported << " sequences exported" << endl;
-    }
-    if (!unPaired.empty()) {
-        cerr << "WARNING: " << unPaired.size() << " reads could not be matched "
-             << "to a mate and were not exported" << endl;
     }
 }
 
