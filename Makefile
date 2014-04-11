@@ -1,5 +1,5 @@
 CXXFLAGS += -I samtools -O3
-LDFLAGS += -lbam -Lsamtools -lz
+LDFLAGS += -lbam -Lsamtools -lz -pthread
 
 SRC = bam2fastq.cpp
 BAM = samtools/libbam.a
