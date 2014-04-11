@@ -1,0 +1,6 @@
+v1.1.0 (18 August 2010)
+ * Added --strict command line option
+ * Altered default handling of read names
+
+v1.0.0 (17 August 2010)
+ * Initial release
