@@ -162,7 +162,7 @@ void mangle(string &name) {
         name.erase(name.length()-2);
 }
 
-vector<ofstream *> initialize_output(const string &out_template, int lane, bool isPaired) {
+vector<ofstream *> initialize_output(const string &out_template, int lane) {
     vector<ofstream *> files;
     string output(out_template);
     
@@ -181,55 +181,44 @@ vector<ofstream *> initialize_output(const string &out_template, int lane, bool 
     
     //Replace # with read number and open ofstreams
     size_t readMarker = output.find('#');
-    if (isPaired) {
-        //Replace
-        if (readMarker == string::npos) {
-            cerr << "The sequences in the BAM file are marked as Paired, but a single output" << endl
-                 << "file is specified.  Ensure that the output filename (--output) includes" << endl
-                 << "a # symbol to be replaced with the read number" << endl;
+
+    //Replace
+    if (readMarker == string::npos) {
+        cerr << "The sequences in the BAM file are marked as Paired, but a single output" << endl
+             << "file is specified.  Ensure that the output filename (--output) includes" << endl
+             << "a # symbol to be replaced with the read number" << endl;
+        return files;
+    }
+    string file1(output);
+    file1.replace(readMarker, 1, "_1");
+    string file2(output);
+    file2.replace(readMarker, 1, "_2");
+    string file3(output);
+    file3.replace(readMarker, 1, "_M");
+    if (print_msgs)
+        cerr << "This looks like paired data from lane " << lane << "." << endl
+             << "Output will be in " << file1 << " and " << file2 << endl
+             << "Single-end reads will be in " << file3 << endl;
+
+    //If we're not going to overwrite, check to see if the files exist
+    if (!overwrite_files) {
+        ifstream test;
+        test.open(file1.c_str());
+        if (test.is_open()) {
+            cerr << "ERROR: " << file1 << " already exists.  Specify --force to overwrite" << endl;
             return files;
         }
-        string file1(output);
-        file1.replace(readMarker, 1, "_1");
-        string file2(output);
-        file2.replace(readMarker, 1, "_2");
-        if (print_msgs)
-            cerr << "This looks like paired data from lane " << lane << "." << endl
-                 << "Output will be in " << file1 << " and " << file2 << endl;
-
-        //If we're not going to overwrite, check to see if the files exist
-        if (!overwrite_files) {
-            ifstream test;
-            test.open(file1.c_str());
-            if (test.is_open()) {
-                cerr << "ERROR: " << file1 << " already exists.  Specify --force to overwrite" << endl;
-                return files;
-            }
-            //test is not open, so don't try closing it
-            test.open(file2.c_str());
-            if (test.is_open()) {
-                cerr << "ERROR: " << file2 << " already exists.  Specify --force to overwrite" << endl;
-                return files;
-            }
+        //test is not open, so don't try closing it
+        test.open(file2.c_str());
+        if (test.is_open()) {
+            cerr << "ERROR: " << file2 << " already exists.  Specify --force to overwrite" << endl;
+            return files;
         }
-        files.push_back(new ofstream(file1.c_str(), ios_base::out));
-        files.push_back(new ofstream(file2.c_str(), ios_base::out));
-    } else {
-        if (readMarker != string::npos)
-            output.replace(readMarker, 1, "");
-        if (print_msgs)
-            cerr << "This looks like single-end data from lane " << lane << "." << endl
-                 << "Output will be in " << output << endl;
-        if (!overwrite_files) {
-            ifstream test;
-            test.open(output.c_str());
-            if (test.is_open()) {
-                cerr << "ERROR: " << output << " already exists.  Specify --force to overwrite" << endl;
-                return files;
-            }
-        }
-        files.push_back(new ofstream(output.c_str(), ios_base::out));
     }
+    files.push_back(new ofstream(file1.c_str(), ios_base::out));
+    files.push_back(new ofstream(file2.c_str(), ios_base::out));
+    files.push_back(new ofstream(file3.c_str(), ios_base::out));
+
     return files;
 }
 
@@ -251,12 +240,13 @@ void parse_bamfile(const char *bam_filename, const string &output_template) {
     bam1_t *read = bam_init1();
     size_t exported = 0;
     size_t all_seen = 0;
+
     bam_read1(sam->x.bam, read);
-    bool isPaired = (read->core.flag & BAM_FPAIRED);
     int lane = get_lane_id(read);
-    vector<ofstream *> output = initialize_output(output_template, lane, isPaired);
+    vector<ofstream *> output = initialize_output(output_template, lane);
     if (output.empty())
         return;
+
     map<string, string> unPaired;
     map<string, string>::iterator position;
     do {
@@ -267,15 +257,23 @@ void parse_bamfile(const char *bam_filename, const string &output_template) {
             continue;
         if (!save_filtered && (read->core.flag & BAM_FQCFAIL))
             continue;
+
         exported++;
         ostringstream ostr;
         ostr << "@" << get_read_name(read) << endl
              << get_sequence(read) << endl
              << "+" << endl
              << get_qualities(read) << endl;
-        if (isPaired) {
-            //Paired-end is complicated, because both members of the pair
-            //have to be output at the same position of the two files
+
+        //Paired-end is complicated, because both members of the pair
+        //have to be output at the same position of the two files
+
+        // Is this an unpaired read in a BAM with pairs? write to the _M file
+        if( !(read->core.flag & BAM_FPAIRED) ) {
+            *output[2] << ostr.str();
+        } else {
+
+            // Search for the pair in the map
             string pairName(get_pair_name(read));
             if (!strict)
                 mangle(pairName);
@@ -292,10 +290,8 @@ void parse_bamfile(const char *bam_filename, const string &output_template) {
                 *output[r_idx] << position->second;
                 unPaired.erase(position);
             }
-        } else {
-            //Single-end?  Just dump it
-            *output[0] << ostr.str();
         }
+
     } while (bam_read1(sam->x.bam, read) > 0);
     //The documentation for bam_read1 says that it returns the number of
     //bytes read - which is true, unless it doesn't read any.  It returns
