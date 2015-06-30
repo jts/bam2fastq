@@ -3,7 +3,7 @@ bam2fastq
     
 bam2fastq is a program to extract sequences and qualities from a BAM file.
 
-The original version can be found [here](http://www.hudsonalpha.org/gsl/information/software/bam2fastq).
+The original version can be found [here](http://gsl.hudsonalpha.org/information/software/bam2fastq).
 It has subsequently been modified to handle BAM files with mixtures of paired and unpaired reads and write to stdout.
 
 ------------
